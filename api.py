@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 AWS_BUCKET = os.getenv('BUCKET_NAME') or os.getenv('S3_BUCKET') or os.getenv('tidaltamufiles')
-AWS_REGION = os.getenv('AWS_REGION')
+AWS_REGION = os.getenv('us-west-2')
 
 if not AWS_BUCKET:
     raise RuntimeError('Environment variable BUCKET_NAME (or S3_BUCKET) must be set')
@@ -31,7 +31,7 @@ allowed = os.getenv('ALLOWED_ORIGINS')
 if allowed:
     origins = [o.strip() for o in allowed.split(',') if o.strip()]
 else:
-    origins = ['*']
+    origins = ['https://testfiles.d2lyi075sbf5dh.amplifyapp.com''https://main.d2lyi075sbf5dh.amplifyapp.com/']
 
 app.add_middleware(
     CORSMiddleware,
