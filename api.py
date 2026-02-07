@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import os
+from db_upload import upload_file
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,6 +31,7 @@ async def add_doc(file: UploadFile = File(...), type: str = Form(...) ):
         save_path = f"temp/files/{file.filename}"
         with open(save_path, "wb") as f:
             f.write(await file.read())
+        upload_file(save_path)
         return {"message": f"Document added successfully, type: {type}", "path": save_path}
     
     elif type in ["mp4", "avi", "mkv"]:
@@ -37,6 +39,7 @@ async def add_doc(file: UploadFile = File(...), type: str = Form(...) ):
         save_path = f"temp/videos/{file.filename}"
         with open(save_path, "wb") as f:
             f.write(await file.read())
+        upload_file(save_path)
         return {"message": f"Video added successfully, type: {type}", "path": save_path}
     
     elif type in ["mp3", "wav", "aac"]:
@@ -44,6 +47,7 @@ async def add_doc(file: UploadFile = File(...), type: str = Form(...) ):
         save_path = f"temp/audios/{file.filename}"
         with open(save_path, "wb") as f:
             f.write(await file.read())
+        upload_file(save_path)
         return {"message": f"Audio added successfully, type: {type}", "path": save_path}
 
     return {"message": "Unknown file type"}
