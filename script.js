@@ -4,8 +4,19 @@ async function saveFileToServer(file){
   const fd = new FormData();
   fd.append('file', file, file.name);
   const resp = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
-  if(!resp.ok) throw new Error('Upload failed: ' + (await resp.text()));
-  return await resp.json();
+  const ct = resp.headers.get('content-type') || '';
+  const bodyText = await resp.text();
+  if(!resp.ok){
+    throw new Error(`Upload failed (${resp.status}): ${bodyText}`);
+  }
+  if(!ct.includes('application/json')){
+    throw new Error('Expected JSON response but received HTML/text: ' + bodyText);
+  }
+  try{
+    return JSON.parse(bodyText);
+  }catch(err){
+    throw new Error('Failed to parse JSON response: ' + bodyText);
+  }
 }
 
 async function loadAllFiles(){

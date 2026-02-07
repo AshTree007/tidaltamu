@@ -27,7 +27,7 @@ def make_key(filename: str) -> str:
 app = FastAPI()
 
 # Configure CORS origins via environment variable `ALLOWED_ORIGINS` (comma-separated).
-allowed = os.getenv('ALLOWED_ORIGINS')
+allowed = os.getenv('https://testfiles.d2lyi075sbf5dh.amplifyapp.com')
 if allowed:
     origins = [o.strip() for o in allowed.split(',') if o.strip()]
 else:
