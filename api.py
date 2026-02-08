@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/upload")
+@app.post("/add_doc")
 async def add_doc(file: UploadFile = File(...), type: str = Form(...) ):
     if type in ["pdf", "docx", "txt"]:
         print("type: ", type)
