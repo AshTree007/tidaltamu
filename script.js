@@ -1,12 +1,13 @@
-const API_BASE = "https://ec2-44-252-41-71.us-west-2.compute.amazonaws.com/upload"
+// const API_BASE = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) ? (window.API_BASE || window.__API_BASE__) : '';
+const API_BASE = "https://ec2-44-252-41-71.us-west-2.compute.amazonaws.com"
+
+
 
 async function saveFileToServer(file){
+  console.log(API_BASE);
   const fd = new FormData();
   fd.append('file', file, file.name);
-  // include file type (extension) so API's Form(...) 'type' is satisfied
-  const ext = (file.name || '').split('.').pop().toLowerCase();
-  fd.append('type', ext);
-  const resp = await fetch(API_BASE + '/add_doc', { method: 'POST', body: fd });
+  const resp = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
   const ct = resp.headers.get('content-type') || '';
   const bodyText = await resp.text();
   if(!resp.ok){
@@ -147,3 +148,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   if(document.getElementById('savedList')) refreshSavedList();
 });
+
