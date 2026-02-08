@@ -358,7 +358,7 @@ def process_pdf_file(bucket, key):
                     # Create prompt including up to 3 base64 JPEGs
                     prompt_parts = [f"Image {i+1} (base64): {b64[:500]}...[TRUNC]" for i, b64 in enumerate(images_b64)]
                     prompt = (
-                        "You are given up to 3 images (as base64 JPEG). Analyze the visual content and return 5-8 MOST IMPORTANT tags that summarize the main topics or objects in the images. "
+                        "You are given images (as base64 JPEG). Analyze the visual content and return 5-8 MOST IMPORTANT tags that summarize the main topics or objects in the images. "
                         "Respond with ONLY a comma-separated list of tags."
                         "\n\n" + "\n\n".join(prompt_parts)
                     )
