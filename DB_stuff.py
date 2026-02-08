@@ -7,6 +7,7 @@ import json
 import urllib.request
 import threading
 import requests
+import time
 import io
 import base64
 try:
@@ -274,23 +275,62 @@ def get_text_from_document_aws(document_bytes: bytes, file_type: str) -> str:
         startup()
 
     try:
-        if file_type in ['png', 'jpeg', 'pdf']:
+        print(f"Textract: Attempting to detect text for file type: {file_type}")
+        extracted_text = ""
+
+        if file_type in ['png', 'jpeg']:
             response = textract.detect_document_text(
                 Document={'Bytes': document_bytes}
             )
+            for item in response["Blocks"]:
+                if item["BlockType"] == "LINE":
+                    extracted_text += item["Text"] + "\n"
+        elif file_type == 'pdf':
+            # For multi-page PDFs, use asynchronous Textract
+            print("Textract: Starting asynchronous text detection for PDF.")
+            start_response = textract.start_document_text_detection(
+                DocumentLocation={'Bytes': document_bytes} # Textract can take bytes directly for start_document_text_detection
+            )
+            job_id = start_response['JobId']
+            print(f"Textract: Job started with ID: {job_id}")
+
+            # Poll for job completion
+            status = ''
+            while status != 'SUCCEEDED' and status != 'FAILED':
+                time.sleep(5) # Poll every 5 seconds
+                job_response = textract.get_document_text_detection(JobId=job_id)
+                status = job_response['JobStatus']
+                print(f"Textract: Job status: {status}")
+
+            if status == 'SUCCEEDED':
+                pages = []
+                next_token = None
+                while True:
+                    if next_token:
+                        page_response = textract.get_document_text_detection(JobId=job_id, NextToken=next_token)
+                    else:
+                        page_response = job_response # First page is already in job_response
+
+                    for item in page_response["Blocks"]:
+                        if item["BlockType"] == "LINE":
+                            extracted_text += item["Text"] + "\n"
+                    
+                    next_token = page_response.get('NextToken')
+                    if not next_token:
+                        break
+            else:
+                print(f"Textract: Asynchronous text detection failed for job ID: {job_id}")
+                return ""
         else:
-            print(f"Unsupported file type for Textract: {file_type}")
+            print(f"Textract: Unsupported file type for Textract: {file_type}")
             return ""
 
-        extracted_text = ""
-        for item in response["Blocks"]:
-            if item["BlockType"] == "LINE":
-                extracted_text += item["Text"] + "\n"
-        
-        print(f"Extracted {len(extracted_text)} characters using Amazon Textract.")
+        print(f"Textract: Extracted {len(extracted_text)} characters using Amazon Textract.")
+        if not extracted_text.strip():
+            print("Textract: Extracted text is empty or only whitespace.")
         return extracted_text
     except Exception as e:
-        print(f"Error in get_text_from_document_aws: {e}")
+        print(f"Textract: Error in get_text_from_document_aws: {e}")
         return ""
 
 def process_text_file(bucket, key):
