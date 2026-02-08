@@ -91,6 +91,7 @@ def list_files():
                     display_name = key
 
                 files.append({
+                    "key": key,
                     "name": display_name,
                     "url": url,
                     "size": obj['Size']
@@ -99,3 +100,14 @@ def list_files():
     except Exception as e:
         print(f"LIST ERROR: {e}")
         return []
+
+def delete_file(key: str) -> bool:
+    """Delete object from S3 by key. Returns True on success."""
+    global s3_client, AWS_BUCKET
+    if s3_client is None: startup()
+    try:
+        s3_client.delete_object(Bucket=AWS_BUCKET, Key=key)
+        return True
+    except Exception as e:
+        print(f"DELETE ERROR: {e}")
+        return False

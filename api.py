@@ -5,6 +5,8 @@ import os
 
 # Import functions from DB_stuff
 from DB_stuff import upload_file, list_files
+from DB_stuff import delete_file
+from fastapi import Body
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,3 +59,15 @@ async def add_doc(file: UploadFile = File(...), type: str = Form(...)):
 @app.get("/list_docs")
 async def get_all_docs():
     return list_files()
+
+
+# Delete route: expects JSON body {"key": "s3_key"}
+@app.post("/delete_doc")
+async def delete_doc(payload: dict = Body(...)):
+    key = payload.get('key')
+    if not key:
+        return {"success": False, "error": "missing key"}
+    ok = delete_file(key)
+    if ok:
+        return {"success": True}
+    return {"success": False, "error": "delete failed"}

@@ -87,13 +87,55 @@ async function refreshSavedList() {
       btn.style.cursor = 'pointer';
       btn.onclick = () => window.open(f.url, '_blank');
 
+      // Remove Button: deletes from S3 and localStorage
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.marginLeft = '8px';
+      removeBtn.style.padding = '5px 12px';
+      removeBtn.style.background = '#e02424';
+      removeBtn.style.color = 'white';
+      removeBtn.style.cursor = 'pointer';
+      removeBtn.onclick = async () => {
+        if(!confirm(`Remove "${f.name}" from cloud?`)) return;
+        try{
+          const resp = await fetch(API_BASE + '/delete_doc', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: f.key }) });
+          const j = await resp.json();
+          if(j && j.success){
+            // remove any matching localStorage records
+            try{ removeLocalEntriesMatching(f); }catch(e){}
+            li.remove();
+          } else {
+            alert('Failed to remove file: '+ (j && j.error ? j.error : 'unknown'));
+          }
+        }catch(err){
+          console.error('Delete error', err);
+          alert('Error deleting file');
+        }
+      };
+
       li.appendChild(left);
       li.appendChild(btn);
+      li.appendChild(removeBtn);
       ul.appendChild(li);
     });
 
   } catch (err) {
     console.error(err);
     ul.innerHTML = `<li style="color:red">Connection Error. Is Server running?</li>`;
+  }
+}
+
+function removeLocalEntriesMatching(f){
+  const STORAGE_PREFIX = 'tidal_file_';
+  for(let i=localStorage.length-1;i>=0;i--){
+    const key = localStorage.key(i);
+    if(!key || !key.startsWith(STORAGE_PREFIX)) continue;
+    try{
+      const rec = JSON.parse(localStorage.getItem(key));
+      if(!rec) continue;
+      if((f.url && rec.url && rec.url === f.url) || (rec.name && rec.name === f.name)){
+        localStorage.removeItem(key);
+      }
+    }catch(e){ }
   }
 }
