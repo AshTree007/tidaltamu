@@ -308,7 +308,7 @@ def get_text_from_image(image_b64: str) -> str:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "mistral/pixtral-12b",
+                "model": "allenai/olmOCR-2-7B-1025",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,  # Low temperature for deterministic OCR
                 "max_tokens": 1500
