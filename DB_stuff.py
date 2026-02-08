@@ -251,7 +251,7 @@ def process_audio_file(bucket, key, db_item_key):
         job_name = f"transcribe_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         transcribe.start_transcription_job(
             TranscriptionJobName=job_name,
-            Media={'S3Object': {'Bucket': bucket, 'Key': key}},
+            Media={'MediaFileUri': f's3://{bucket}/{key}'},
             MediaFormat=key.split('.')[-1].lower(),
             LanguageCode='en-US'
         )
@@ -289,7 +289,7 @@ def process_video_file(bucket, key, db_item_key):
         transcribe_job_name = f"transcribe_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         transcribe.start_transcription_job(
             TranscriptionJobName=transcribe_job_name,
-            Media={'S3Object': {'Bucket': bucket, 'Key': key}},
+            Media={'MediaFileUri': f's3://{bucket}/{key}'},
             MediaFormat=key.split('.')[-1].lower(),  # mp4, mov, etc.
             LanguageCode='en-US'
         )
