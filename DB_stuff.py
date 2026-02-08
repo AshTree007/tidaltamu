@@ -2,6 +2,7 @@ import boto3
 import os
 import time
 import uuid
+import mimetypes
 from fastapi import HTTPException
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Attr
@@ -65,11 +66,16 @@ def upload_file(file_path: str) -> str:
         with open(file_path, "rb") as f:
             contents = f.read()
 
+        # Use proper MIME type for ContentType
+        content_type, _ = mimetypes.guess_type(file_name)
+        if not content_type:
+            content_type = 'application/octet-stream'
+
         s3_client.put_object(
             Bucket=AWS_BUCKET, 
             Key=key, 
             Body=contents, 
-            ContentType=file_ext
+            ContentType=content_type
         )
         
         url = s3_client.generate_presigned_url(
