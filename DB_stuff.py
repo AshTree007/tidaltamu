@@ -304,38 +304,62 @@ def process_text_file(bucket, key):
         return []
 
 def process_pdf_file(bucket, key):
-    """Download PDF from S3, extract text, and send to Qwen for tags"""
+    """Download PDF from S3 and send directly to Qwen for tagging"""
     global s3_client
     if s3_client is None:
         startup()
     
-    if PdfReader is None:
-        print("PDF processing not available (pypdf not installed)")
-        return []
+    api_key = os.getenv("API_KEY")
     
     try:
         print(f"Processing PDF file {key}...")
         response = s3_client.get_object(Bucket=bucket, Key=key)
         pdf_bytes = response['Body'].read()
         
-        # Extract text from PDF
-        try:
-            pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
-            text_content = ""
-            for page in pdf_reader.pages:
-                text_content += page.extract_text() + " "
-        except Exception as pdf_err:
-            print(f"Error extracting text from PDF: {pdf_err}")
-            return []
+        # Encode PDF as base64 for sending to Qwen
+        import base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        print(f"PDF encoded: {len(pdf_base64)} characters (base64)")
         
-        if not text_content.strip():
-            print("PDF contains no extractable text")
-            return []
+        # Send PDF directly to Qwen with instructions to extract and tag
+        prompt = f"""You are analyzing a PDF document (provided as base64). Your task is to:
+1. Extract and understand the key content and concepts from this PDF
+2. Identify 5-8 of the MOST IMPORTANT and MEANINGFUL tags that capture the main topics and ideas
+
+Respond with ONLY a comma-separated list of tags, nothing else. Example format: Machine Learning, Data Science, Neural Networks
+
+PDF (base64): {pdf_base64[:500]}...[PDF_CONTENT]"""
         
-        print(f"PDF text extracted: {len(text_content)} characters")
-        tags = get_text_tags(text_content)
-        print(f"PDF tags: {tags}")
-        return tags
+        response = requests.post(
+            "https://api.featherless.ai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "Qwen/Qwen2.5-7B-Instruct",
+                "messages": [{
+                    "role": "user", 
+                    "content": f"Extract 5-8 important tags from this PDF document (base64 encoded):\n\n{pdf_base64}"
+                }],
+                "temperature": 0.3,
+                "max_tokens": 200
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'choices' in result and len(result['choices']) > 0:
+                tags_text = result['choices'][0]['message']['content'].strip()
+                tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+                tags = deduplicate_tags(tags)[:8]
+                print(f"Extracted {len(tags)} tags from PDF via Qwen")
+                return tags
+        else:
+            print(f"Featherless API error: {response.status_code} - {response.text}")
+            return []
+            
     except Exception as e:
         print(f"PDF Processing Error: {e}")
         import traceback
