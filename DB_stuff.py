@@ -370,7 +370,7 @@ def process_pdf_file(bucket, key):
                             "Content-Type": "application/json"
                         },
                         json={
-                            "model": "Qwen/Qwen2.5-7B-Instruct",
+                            "model": "google/gemma-3-27b-it",
                             "messages": [{"role": "user", "content": prompt}],
                             "temperature": 0.3,
                             "max_tokens": 200
@@ -384,7 +384,7 @@ def process_pdf_file(bucket, key):
                             tags_text = result['choices'][0]['message']['content'].strip()
                             tags = [t.strip() for t in tags_text.split(',') if t.strip()]
                             tags = deduplicate_tags(tags)[:8]
-                            print(f"Extracted {len(tags)} tags from PDF images via Qwen")
+                            print(f"Extracted {len(tags)} tags from PDF images via Gemma")
                             return tags
                     else:
                         print(f"Featherless image API error: {resp.status_code} - {resp.text}")
@@ -399,7 +399,7 @@ def process_pdf_file(bucket, key):
             resp = requests.post(
                 "https://api.featherless.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "Qwen/Qwen2.5-7B-Instruct", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 200},
+                json={"model": "google/gemma-3-27b-it", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 200},
                 timeout=60
             )
             if resp.status_code == 200:
@@ -408,10 +408,10 @@ def process_pdf_file(bucket, key):
                     tags_text = result['choices'][0]['message']['content'].strip()
                     tags = [t.strip() for t in tags_text.split(',') if t.strip()]
                     tags = deduplicate_tags(tags)[:8]
-                    print(f"Extracted {len(tags)} tags from PDF via Qwen (fallback)")
+                    print(f"Extracted {len(tags)} tags from PDF via Gemma (fallback)")
                     return tags
         except Exception as e:
-            print(f"Final PDF->Qwen fallback failed: {e}")
+            print(f"Final PDF->Gemma fallback failed: {e}")
 
         return []
     except Exception as e:
