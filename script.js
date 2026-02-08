@@ -88,13 +88,45 @@ async function refreshSavedList() {
       // View Button
       const btn = document.createElement('button');
       btn.textContent = 'View';
-      btn.style.marginLeft = 'auto';
       btn.style.padding = '5px 15px';
       btn.style.cursor = 'pointer';
       btn.onclick = () => window.open(f.url, '_blank');
 
+      // Remove Button: deletes from S3 and localStorage
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = 'Remove';
+      removeBtn.style.marginLeft = '8px';
+      removeBtn.style.padding = '5px 12px';
+      removeBtn.style.background = '#e02424';
+      removeBtn.style.color = 'white';
+      removeBtn.style.cursor = 'pointer';
+      removeBtn.onclick = async () => {
+        if(!confirm(`Remove "${f.name}" from cloud?`)) return;
+        try{
+          const resp = await fetch(API_BASE + '/delete_doc', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: f.key }) });
+          const j = await resp.json();
+          if(j && j.success){
+            try{ removeLocalEntriesMatching(f); }catch(e){}
+            li.remove();
+          } else {
+            alert('Failed to remove file: '+ (j && j.error ? j.error : 'unknown'));
+          }
+        }catch(err){
+          console.error('Delete error', err);
+          alert('Error deleting file');
+        }
+      };
+
+      // Buttons container
+      const btnContainer = document.createElement('div');
+      btnContainer.style.display = 'flex';
+      btnContainer.style.gap = '8px';
+      btnContainer.style.marginLeft = 'auto';
+      btnContainer.appendChild(btn);
+      btnContainer.appendChild(removeBtn);
+
       li.appendChild(left);
-      li.appendChild(btn);
+      li.appendChild(btnContainer);
       ul.appendChild(li);
     });
 
@@ -161,5 +193,20 @@ async function refreshSearchResults(query) {
   } catch(err) {
       console.error(err);
       ul.innerHTML = '<li style="color:red">Search Error</li>';
+  }
+}
+
+function removeLocalEntriesMatching(f){
+  const STORAGE_PREFIX = 'tidal_file_';
+  for(let i=localStorage.length-1;i>=0;i--){
+    const key = localStorage.key(i);
+    if(!key || !key.startsWith(STORAGE_PREFIX)) continue;
+    try{
+      const rec = JSON.parse(localStorage.getItem(key));
+      if(!rec) continue;
+      if((f.url && rec.url && rec.url === f.url) || (rec.name && rec.name === f.name)){
+        localStorage.removeItem(key);
+      }
+    }catch(e){ }
   }
 }
