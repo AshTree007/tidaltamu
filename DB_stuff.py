@@ -52,22 +52,41 @@ def process_transcription_job_background(job_name, bucket, file_key, db_item_key
                                 if len(transcripts) > 0:
                                     transcript_text = transcripts[0]['transcript']
                                     print(f"[BACKGROUND] Extracted transcript ({len(transcript_text)} chars)")
-                                    tags = get_text_tags(transcript_text)
                                     
-                                    # Update DynamoDB with tags AND transcript
+                                    # Generate tags from transcript using Comprehend
+                                    transcript_tags = get_text_tags(transcript_text)
+                                    print(f"[BACKGROUND] Generated {len(transcript_tags)} tags from transcript")
+                                    
+                                    # Get visual labels if this is a video (they're stored separately)
+                                    final_tags = transcript_tags
+                                    visual_labels = []
+                                    
                                     if dynamodb:
+                                        # Retrieve current item to get visual labels
+                                        item_response = dynamodb.get_item(Key={'filename': db_item_key})
+                                        if 'Item' in item_response:
+                                            visual_labels = item_response['Item'].get('visual_labels', [])
+                                            print(f"[BACKGROUND] Found {len(visual_labels)} visual labels from video")
+                                        
+                                        # Combine transcript tags and visual labels (remove duplicates)
+                                        final_tags = list(set(transcript_tags + visual_labels))[:15]
+                                        print(f"[BACKGROUND] Combined tags: {len(final_tags)} total (transcript + visual)")
+                                        
+                                        # Update DynamoDB with both transcript and combined tags
                                         dynamodb.update_item(
                                             Key={'filename': db_item_key},
                                             UpdateExpression='SET tags = :tags, transcript = :transcript',
                                             ExpressionAttributeValues={
-                                                ':tags': tags,
+                                                ':tags': final_tags,
                                                 ':transcript': transcript_text
                                             }
                                         )
-                                        print(f"[BACKGROUND] Updated DynamoDB with {len(tags)} tags and transcript")
+                                        print(f"[BACKGROUND] Updated DynamoDB with transcript and {len(final_tags)} final tags")
                                     return
                     except Exception as e:
                         print(f"[BACKGROUND] Error processing transcript: {e}")
+                        import traceback
+                        traceback.print_exc()
                         return
                         
                 elif status == 'FAILED':
@@ -81,6 +100,10 @@ def process_transcription_job_background(job_name, bucket, file_key, db_item_key
             time.sleep(60)  # Poll every 60 seconds
         
         print(f"[BACKGROUND] Transcription job timed out: {job_name}")
+    except Exception as e:
+        print(f"[BACKGROUND] Fatal error in transcription background task: {e}")
+        import traceback
+        traceback.print_exc()
     except Exception as e:
         print(f"[BACKGROUND] Fatal error in transcription background task: {e}")
         import traceback
@@ -109,16 +132,16 @@ def process_video_job_background(job_id, db_item_key):
                             if 'Label' in label_obj and 'Name' in label_obj['Label']:
                                 labels_set.add(label_obj['Label']['Name'])
                     labels_list = list(labels_set)[:10]
-                    print(f"[BACKGROUND] Extracted {len(labels_list)} labels from video")
+                    print(f"[BACKGROUND] Extracted {len(labels_list)} visual labels from video")
                     
-                    # Update DynamoDB with tags
+                    # Store visual labels in a temporary spot - will be merged with transcript tags later
                     if dynamodb:
                         dynamodb.update_item(
                             Key={'filename': db_item_key},
-                            UpdateExpression='SET tags = :tags',
-                            ExpressionAttributeValues={':tags': labels_list}
+                            UpdateExpression='SET visual_labels = :labels',
+                            ExpressionAttributeValues={':labels': labels_list}
                         )
-                        print(f"[BACKGROUND] Updated DynamoDB with video labels")
+                        print(f"[BACKGROUND] Stored visual labels for video")
                     return
                     
                 elif status == 'FAILED':
@@ -251,34 +274,58 @@ def process_audio_file(bucket, key, db_item_key):
         return []
 
 def process_video_file(bucket, key, db_item_key):
-    """Start AWS Rekognition Video job asynchronously and return immediately"""
-    global rekognition
+    """Start BOTH AWS Transcribe AND Rekognition Video jobs asynchronously"""
+    global rekognition, transcribe
     if rekognition is None:
+        startup()
+    if transcribe is None:
         startup()
     
     try:
-        print(f"Starting video label detection for {key}...")
+        print(f"Starting DUAL processing for video {key}...")
+        
+        # 1. Start Transcribe job for audio (with video file)
+        print(f"  - Starting transcription for audio in {key}...")
+        transcribe_job_name = f"transcribe_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        transcribe.start_transcription_job(
+            TranscriptionJobName=transcribe_job_name,
+            Media={'S3Object': {'Bucket': bucket, 'Key': key}},
+            MediaFormat=key.split('.')[-1].lower(),  # mp4, mov, etc.
+            LanguageCode='en-US'
+        )
+        print(f"  ✓ Transcription job started: {transcribe_job_name}")
+        
+        # 2. Start Rekognition Video job for visual labels
+        print(f"  - Starting visual label detection for {key}...")
         client_request_token = uuid.uuid4().hex[:8]
         start_response = rekognition.start_label_detection(
             Video={'S3Object': {'Bucket': bucket, 'Name': key}},
             ClientRequestToken=client_request_token,
             MinConfidence=70
         )
-        job_id = start_response['JobId']
-        print(f"Video label detection job started: {job_id}")
+        video_job_id = start_response['JobId']
+        print(f"  ✓ Video label detection job started: {video_job_id}")
         
-        # Launch background thread to monitor job
-        bg_thread = threading.Thread(
-            target=process_video_job_background,
-            args=(job_id, db_item_key),
+        # 3. Launch background thread for transcription (will generate tags from transcript + merge with visual labels)
+        bg_thread_transcribe = threading.Thread(
+            target=process_transcription_job_background,
+            args=(transcribe_job_name, bucket, key, db_item_key),
             daemon=True
         )
-        bg_thread.start()
+        bg_thread_transcribe.start()
         
-        # Return immediately with empty tags (will be filled by background task)
+        # 4. Launch background thread for video label detection
+        bg_thread_video = threading.Thread(
+            target=process_video_job_background,
+            args=(video_job_id, db_item_key),
+            daemon=True
+        )
+        bg_thread_video.start()
+        
+        print(f"✓ Both background tasks started for {key}")
         return []
     except Exception as e:
-        print(f"Error starting video job: {e}")
+        print(f"Error starting video processing: {e}")
         import traceback
         traceback.print_exc()
         return []
@@ -349,6 +396,7 @@ def upload_file(file_path: str) -> str:
                         'url': url,
                         'tags': tags,
                         'transcript': '',  # Will be filled in by background task for audio/video
+                        'visual_labels': [],  # Will be filled in by video job background task
                         'created_at': str(int(time.time()))
                     }
                 )

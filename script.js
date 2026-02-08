@@ -93,7 +93,7 @@ async function refreshSavedList() {
           const isAudioOrVideo = /\.(mp3|wav|mp4|mov|avi|mkv|aac)$/i.test(f.name);
           if (isAudioOrVideo) {
               meta.style.color = '#ffaa00'; // Orange for "processing"
-              meta.textContent = "⏳ Processing tags (audio/video can take 5-15 minutes)...";
+              meta.textContent = "⏳ Processing audio & visual tags (5-15 minutes)...";
           } else {
               meta.style.color = '#777';
               meta.textContent = "No tags";
@@ -289,7 +289,10 @@ async function showTranscriptModal(key, fileName) {
       transcriptDiv.style.whiteSpace = 'pre-wrap';
       transcriptDiv.style.wordWrap = 'break-word';
     } else {
-      transcriptDiv.textContent = '⏳ Transcript is being processed. Please check back later. Audio/video transcription can take 5-15 minutes.';
+      const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(data.filename);
+      transcriptDiv.textContent = isVideo 
+        ? '⏳ Video audio is being transcribed. This typically takes 5-15 minutes. Please check back later.'
+        : '⏳ Audio is being transcribed. This typically takes 5-15 minutes. Please check back later.';
       transcriptDiv.style.color = '#ffaa00';
       transcriptDiv.style.fontStyle = 'italic';
     }
