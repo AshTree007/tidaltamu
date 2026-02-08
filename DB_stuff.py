@@ -308,7 +308,7 @@ def get_text_from_image(image_b64: str) -> str:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "google/gemma-3-27b-it",
+                "model": "mistral/pixtral-12b",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,  # Low temperature for deterministic OCR
                 "max_tokens": 1500
