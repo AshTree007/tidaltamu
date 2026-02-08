@@ -1,6 +1,7 @@
 const API_BASE = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) ? (window.API_BASE || window.__API_BASE__) : '';
 
 async function saveFileToServer(file){
+  console.log(API_BASE);
   const fd = new FormData();
   fd.append('file', file, file.name);
   const resp = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });

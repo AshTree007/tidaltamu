@@ -3,9 +3,13 @@ import time
 import uuid
 from typing import List
 
+from dotenv import load_dotenv
+
 import boto3
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 
 AWS_BUCKET = os.getenv('BUCKET_NAME') or os.getenv('S3_BUCKET') or os.getenv('tidaltamufiles')
