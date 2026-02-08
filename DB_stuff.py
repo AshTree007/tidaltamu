@@ -127,7 +127,6 @@ def list_files():
                 try: display_name = key.split('_', 2)[-1]
                 except: display_name = key
 
-                files.append({"name": display_name, "url": url, "size": obj['Size']})
                 files.append({
                     "key": key,
                     "name": display_name,
