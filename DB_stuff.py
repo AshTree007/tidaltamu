@@ -195,7 +195,7 @@ def process_video_job_background(job_id, db_item_key):
         traceback.print_exc()
 
 def startup():
-    global s3_client, AWS_BUCKET, rekognition, comprehend, transcribe, dynamodb
+    global s3_client, AWS_BUCKET, rekognition, comprehend, transcribe, dynamodb, textract
     
     AWS_REGION = os.getenv("S3_REGION")
     AWS_BUCKET = os.getenv("BUCKET_NAME")
@@ -209,6 +209,7 @@ def startup():
             rekognition = boto3.client('rekognition', region_name=AWS_REGION)
             comprehend = boto3.client('comprehend', region_name=AWS_REGION)
             transcribe = boto3.client('transcribe', region_name=AWS_REGION)
+            textract = boto3.client('textract', region_name=AWS_REGION) # Added Textract client
             dynamo_resource = boto3.resource('dynamodb', region_name=AWS_REGION)
             dynamodb = dynamo_resource.Table('MediaTags')
             print(f"AWS Services Initialized. Bucket: {AWS_BUCKET}")
@@ -238,95 +239,58 @@ def get_ai_tags(bucket, key, file_ext):
         return []
 
 def get_text_tags(text):
-    """Extract importance-weighted tags from transcripts using Qwen 2.5-7B via Featherless API"""
+    """Extract importance-weighted tags from text using Amazon Comprehend."""
+    global comprehend
+    if comprehend is None:
+        startup()
+
     if not text or len(text.strip()) == 0:
         print("Warning: Empty text provided to get_text_tags")
         return []
     
-    api_key = os.getenv("API_KEY")
-    
     try:
-        # Truncate to first 4000 chars to respect model limits
-        text_truncated = text[:4000]
+        # Comprehend can process up to 5000 characters per call for key phrases
+        text_truncated = text[:4900] # Keep some buffer
         
-        prompt = f"""You are an AI assistant that generates descriptive tags for user-uploaded documents. The document content is provided below. Your task is to analyze the text and extract 5-8 of the most important and meaningful tags that capture the key topics, concepts, and ideas.
-
-**Important Instructions:**
-- The document can be of any type (e.g., academic paper, personal note, code snippet, homework). Do not assume a specific document type.
-- The tags should be neutral, objective, and directly related to the provided text.
-- Avoid generating generic, boilerplate, or irrelevant tags (e.g., "Contract", "Legal Document", "Agreement").
-- Focus on semantic importance and relevance, not just frequent words.
-
-Transcript:
-{text_truncated}
-
-Respond with ONLY a comma-separated list of tags, nothing else. Example format: Mathematics, Algebra, Equations, Homework"""
-        
-        response = requests.post(
-            "https://api.featherless.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "Qwen/Qwen2.5-7B-Instruct",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,  # Lower temperature for more focused output
-                "max_tokens": 200
-            },
-            timeout=60
+        response = comprehend.detect_key_phrases(
+            Text=text_truncated,
+            LanguageCode='en'
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            if 'choices' in result and len(result['choices']) > 0:
-                tags_text = result['choices'][0]['message']['content'].strip()
-                # Parse comma-separated tags and clean them
-                tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
-                tags = deduplicate_tags(tags)[:8]
-                print(f"Extracted {len(tags)} importance-weighted tags from transcript via Qwen")
-                return tags
-        else:
-            print(f"Featherless API error: {response.status_code} - {response.text}")
-            return []
+        tags = [phrase['Text'] for phrase in response['KeyPhrases'] if phrase['Score'] >= 0.8]
+        tags = deduplicate_tags(tags)[:8] # Limit to top 8 unique tags
+        
+        print(f"Extracted {len(tags)} tags using Amazon Comprehend.")
+        return tags
             
     except Exception as e:
-        print(f"Text Tagging Error: {e}")
+        print(f"Comprehend Tagging Error: {e}")
         return []
 
-def get_text_from_image(image_b64: str) -> str:
-    """Extract text from a single image using an OCR prompt."""
-    api_key = os.getenv("API_KEY")
-    
-    prompt = f"You are an OCR engine. Your task is to extract all text from the given image. Do not add any comments, explanations, or summaries. Return only the raw, extracted text.\n\nImage (base64): {image_b64[:500]}...[TRUNC]"
-    
+def get_text_from_document_aws(document_bytes: bytes, file_type: str) -> str:
+    """Extract text from a document (image or PDF) using Amazon Textract."""
+    global textract
+    if textract is None:
+        startup()
+
     try:
-        resp = requests.post(
-            "https://api.featherless.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "allenai/olmOCR-2-7B-1025",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.1,  # Low temperature for deterministic OCR
-                "max_tokens": 1500
-            },
-            timeout=90
-        )
-        
-        if resp.status_code == 200:
-            result = resp.json()
-            if 'choices' in result and len(result['choices']) > 0:
-                extracted_text = result['choices'][0]['message']['content'].strip()
-                print(f"Extracted {len(extracted_text)} characters from image via OCR.")
-                return extracted_text
+        if file_type in ['png', 'jpeg', 'pdf']:
+            response = textract.detect_document_text(
+                Document={'Bytes': document_bytes}
+            )
         else:
-            print(f"Featherless OCR API error: {resp.status_code} - {resp.text}")
+            print(f"Unsupported file type for Textract: {file_type}")
             return ""
+
+        extracted_text = ""
+        for item in response["Blocks"]:
+            if item["BlockType"] == "LINE":
+                extracted_text += item["Text"] + "\n"
+        
+        print(f"Extracted {len(extracted_text)} characters using Amazon Textract.")
+        return extracted_text
     except Exception as e:
-        print(f"Error in get_text_from_image: {e}")
+        print(f"Error in get_text_from_document_aws: {e}")
         return ""
 
 def process_text_file(bucket, key):
@@ -381,34 +345,17 @@ def process_pdf_file(bucket, key):
             tags = get_text_tags(extracted_text)
             return {'tags': tags, 'transcript': extracted_text}
 
-        # 2) Fallback: If pypdf fails, render PDF to images and use OCR
-        print("pypdf failed or extracted too little text. Falling back to image-based OCR.")
-        if fitz is not None:
-            try:
-                doc = fitz.open(stream=pdf_bytes, filetype='pdf')
-                ocr_text = ''
-                max_pages = min(5, doc.page_count)  # Process up to 5 pages
-                
-                for i in range(max_pages):
-                    page = doc.load_page(i)
-                    pix = page.get_pixmap(dpi=150)
-                    img_bytes = pix.tobytes(output='jpeg')
-                    img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-                    
-                    print(f"Performing OCR on page {i+1}/{max_pages}...")
-                    page_text = get_text_from_image(img_b64)
-                    ocr_text += page_text + '\n'
-                
-                if ocr_text and len(ocr_text.strip()) >= 20:
-                    print(f"Successfully extracted {len(ocr_text)} characters using OCR fallback.")
-                    print("Generating tags from OCR extracted text.")
-                    tags = get_text_tags(ocr_text)
-                    return {'tags': tags, 'transcript': ocr_text}
-                else:
-                    print("OCR fallback did not yield significant text.")
-
-            except Exception as e:
-                print(f"PDF->image->OCR conversion failed: {e}")
+        # 2) Fallback: If pypdf fails, use Amazon Textract for OCR
+        print("pypdf failed or extracted too little text. Falling back to Amazon Textract for OCR.")
+        ocr_text = get_text_from_document_aws(pdf_bytes, 'pdf')
+        
+        if ocr_text and len(ocr_text.strip()) >= 20:
+            print(f"Successfully extracted {len(ocr_text)} characters using Amazon Textract fallback.")
+            print("Generating tags from OCR extracted text.")
+            tags = get_text_tags(ocr_text)
+            return {'tags': tags, 'transcript': ocr_text}
+        else:
+            print("Amazon Textract fallback did not yield significant text.")
 
         print("Could not extract text from PDF using any method.")
         return {'tags': [], 'transcript': ''}
