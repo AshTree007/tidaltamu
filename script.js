@@ -1,5 +1,5 @@
 // const API_BASE = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) ? (window.API_BASE || window.__API_BASE__) : '';
-const API_BASE = "https://ec2-44.243.17.123.us-west-2.compute.amazonaws.com"
+const API_BASE = "https://ec2-44-243-17-123.us-west-2.compute.amazonaws.com"
 
 // Highlight active nav tab
 document.addEventListener('DOMContentLoaded', () => {
