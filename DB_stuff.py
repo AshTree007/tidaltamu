@@ -20,24 +20,18 @@ def make_key(filename: str) -> str:
 def startup():
     global s3_client, AWS_BUCKET, rekognition, dynamodb
     
-    AWS_REGION = os.getenv("S3_REGION", "us-east-1")
-    AWS_BUCKET = os.getenv("BUCKET_NAME")
+    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    AWS_BUCKET = os.getenv("AWS_BUCKET")
 
     if not AWS_BUCKET:
         print("CRITICAL ERROR: AWS_BUCKET not found. Check .env file.")
 
     if s3_client is None:
         try:
-            # 1. Connect to S3
             s3_client = boto3.client('s3', region_name=AWS_REGION)
-            
-            # 2. Connect to Rekognition (AI)
             rekognition = boto3.client('rekognition', region_name=AWS_REGION)
-            
-            # 3. Connect to DynamoDB (Database)
             dynamo_resource = boto3.resource('dynamodb', region_name=AWS_REGION)
             dynamodb = dynamo_resource.Table('MediaTags')
-            
             print(f"AWS Services Initialized. Bucket: {AWS_BUCKET}")
         except Exception as e:
             print(f"Failed to connect to AWS: {e}")
@@ -67,7 +61,7 @@ def upload_file(file_path: str) -> str:
     file_ext = file_name.split('.')[-1].lower()
     
     try:
-        # 1. Upload to S3 (Binary Mode)
+        # 1. Upload to S3
         with open(file_path, "rb") as f:
             contents = f.read()
 
@@ -84,10 +78,9 @@ def upload_file(file_path: str) -> str:
             ExpiresIn=3600
         )
         
-        # 2. Ask AI for Tags
+        # 2. Get Tags & Save to DB
         tags = get_ai_tags(AWS_BUCKET, key, file_ext)
         
-        # 3. Save to DynamoDB
         if dynamodb:
             try:
                 dynamodb.put_item(
@@ -109,40 +102,41 @@ def upload_file(file_path: str) -> str:
         raise HTTPException(status_code=500, detail=f'Upload failed: {e}')
 
 def list_files():
-    # Lists files from S3
-    global s3_client, AWS_BUCKET
-    if s3_client is None: startup()
-
+    # Fetch from DynamoDB to get tags, but include 'key' for deletion
+    global dynamodb, s3_client, AWS_BUCKET
+    if dynamodb is None: startup()
+    
     try:
-        response = s3_client.list_objects_v2(Bucket=AWS_BUCKET)
-        files = []
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                key = obj['Key']
-                url = s3_client.generate_presigned_url(
-                    'get_object', 
-                    Params={'Bucket': AWS_BUCKET, 'Key': key}, 
-                    ExpiresIn=3600
-                )
-                try: display_name = key.split('_', 2)[-1]
-                except: display_name = key
-
-                files.append({
-                    "key": key,
-                    "name": display_name,
-                    "url": url,
-                    "size": obj['Size']
-                })
-        return files
+        response = dynamodb.scan()
+        items = response.get('Items', [])
+        
+        final_list = []
+        for item in items:
+            key = item['filename']
+            # Generate fresh URL
+            fresh_url = s3_client.generate_presigned_url(
+                'get_object', 
+                Params={'Bucket': AWS_BUCKET, 'Key': key}, 
+                ExpiresIn=3600
+            )
+            
+            final_list.append({
+                "name": item.get('original_name', key),
+                "key": key,  # <--- CRITICAL FOR DELETE BUTTON
+                "url": fresh_url,
+                "tags": item.get('tags', []),
+                "size": 0 
+            })
+            
+        return final_list
+        
     except Exception as e:
-        print(f"LIST ERROR: {e}")
+        print(f"DB LIST ERROR: {e}")
         return []
 
 def search_files(query: str):
-    # Searches DynamoDB
     global dynamodb
     if dynamodb is None: startup()
-    
     try:
         response = dynamodb.scan(
             FilterExpression=Attr('tags').contains(query) | Attr('original_name').contains(query)
@@ -151,13 +145,19 @@ def search_files(query: str):
     except Exception as e:
         print(f"Search Error: {e}")
         return []
-def delete_file(key: str) -> bool:
-    """Delete object from S3 by key. Returns True on success."""
-    global s3_client, AWS_BUCKET
+
+def delete_file(key: str):
+    # Helper to delete from S3 and DynamoDB
+    global s3_client, AWS_BUCKET, dynamodb
     if s3_client is None: startup()
+    
     try:
+        # Delete from S3
         s3_client.delete_object(Bucket=AWS_BUCKET, Key=key)
+        # Delete from DynamoDB
+        if dynamodb:
+            dynamodb.delete_item(Key={'filename': key})
         return True
     except Exception as e:
-        print(f"DELETE ERROR: {e}")
+        print(f"Delete Error: {e}")
         return False

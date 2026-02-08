@@ -54,61 +54,79 @@ async function refreshSavedList() {
   const ul = document.getElementById('savedList');
   if (!ul) return;
 
-  ul.innerHTML = '<li style="color:white">Loading files from Cloud...</li>';
+  ul.innerHTML = '<li style="color:white">Loading files...</li>';
 
   try {
     const resp = await fetch(API_BASE + '/list_docs');
     const files = await resp.json();
-    ul.innerHTML = ''; // Clear loading text
+    ul.innerHTML = ''; 
 
     if (files.length === 0) {
-      ul.innerHTML = '<li style="color:gray">No files found in bucket.</li>';
+      ul.innerHTML = '<li style="color:gray">No files found. Upload new files to see tags.</li>';
       return;
     }
 
     files.forEach(f => {
       const li = document.createElement('li');
       
-      // File Info Area
+      // --- LEFT SIDE: Name + Tags ---
       const left = document.createElement('div');
+      
+      // 1. Filename
       const title = document.createElement('div');
       title.textContent = f.name;
       title.style.fontWeight = 'bold';
       title.style.color = 'white';
       
+      // 2. Tags (NEW)
       const meta = document.createElement('div');
       meta.style.fontSize = '12px';
-      meta.style.color = '#aaa';
-      meta.textContent = `Size: ${(f.size / 1024).toFixed(1)} KB`;
+      if (f.tags && f.tags.length > 0) {
+          meta.style.color = '#4ea8ff'; // Blue
+          meta.textContent = "Tags: " + f.tags.join(', ');
+      } else {
+          meta.style.color = '#777';
+          meta.textContent = "No tags";
+      }
       
       left.appendChild(title);
       left.appendChild(meta);
 
-      // View Button
+      // --- RIGHT SIDE: Buttons ---
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.alignItems = 'center';
+
+      // 1. View Button
       const btn = document.createElement('button');
       btn.textContent = 'View';
       btn.style.padding = '5px 15px';
       btn.style.cursor = 'pointer';
+      btn.style.marginRight = '10px';
       btn.onclick = () => window.open(f.url, '_blank');
 
-      // Remove Button: deletes from S3 and localStorage
+      // 2. Delete Button (RESTORED)
       const removeBtn = document.createElement('button');
-      removeBtn.textContent = 'Remove';
-      removeBtn.style.marginLeft = '8px';
-      removeBtn.style.padding = '5px 12px';
-      removeBtn.style.background = '#e02424';
+      removeBtn.textContent = 'Delete';
+      removeBtn.style.background = '#ff4444';
       removeBtn.style.color = 'white';
+      removeBtn.style.border = 'none';
+      removeBtn.style.padding = '5px 10px';
       removeBtn.style.cursor = 'pointer';
+      
       removeBtn.onclick = async () => {
         if(!confirm(`Remove "${f.name}" from cloud?`)) return;
         try{
-          const resp = await fetch(API_BASE + '/delete_doc', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ key: f.key }) });
+          const resp = await fetch(API_BASE + '/delete_doc', { 
+            method: 'POST', 
+            headers: {'Content-Type':'application/json'}, 
+            body: JSON.stringify({ key: f.key }) 
+          });
           const j = await resp.json();
-          if(j && j.success){
-            try{ removeLocalEntriesMatching(f); }catch(e){}
+          if(j && j.success || resp.ok){ // Handle flexible success response
             li.remove();
           } else {
-            alert('Failed to remove file: '+ (j && j.error ? j.error : 'unknown'));
+            alert('Failed to remove file.');
           }
         }catch(err){
           console.error('Delete error', err);
@@ -116,22 +134,17 @@ async function refreshSavedList() {
         }
       };
 
-      // Buttons container
-      const btnContainer = document.createElement('div');
-      btnContainer.style.display = 'flex';
-      btnContainer.style.gap = '8px';
-      btnContainer.style.marginLeft = 'auto';
-      btnContainer.appendChild(btn);
-      btnContainer.appendChild(removeBtn);
+      right.appendChild(btn);
+      right.appendChild(removeBtn);
 
       li.appendChild(left);
-      li.appendChild(btnContainer);
+      li.appendChild(right);
       ul.appendChild(li);
     });
 
   } catch (err) {
     console.error(err);
-    ul.innerHTML = `<li style="color:red">Connection Error. Is Server running?</li>`;
+    ul.innerHTML = `<li style="color:red">Error loading list. Is server running?</li>`;
   }
 }
 
