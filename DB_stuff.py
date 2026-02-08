@@ -77,13 +77,8 @@ def process_transcription_job_background(job_name, bucket, file_key, db_item_key
                                     transcript_text = transcripts[0]['transcript']
                                     print(f"[BACKGROUND] Extracted transcript ({len(transcript_text)} chars)")
                                     
-                                    # Generate tags from transcript using Comprehend
-                                    transcript_tags = get_text_tags(transcript_text)
-                                    transcript_tags = deduplicate_tags(transcript_tags)
-                                    print(f"[BACKGROUND] Generated {len(transcript_tags)} unique tags from transcript")
-                                    
                                     # Get visual labels if this is a video (they're stored separately)
-                                    final_tags = transcript_tags
+                                    final_tags = []
                                     visual_labels = []
                                     
                                     if dynamodb:
@@ -93,12 +88,27 @@ def process_transcription_job_background(job_name, bucket, file_key, db_item_key
                                             visual_labels = item_response['Item'].get('visual_labels', [])
                                             print(f"[BACKGROUND] Found {len(visual_labels)} visual labels from video")
                                         
-                                        # Combine transcript tags and visual labels (remove duplicates case-insensitively)
-                                        combined = transcript_tags + visual_labels
-                                        final_tags = deduplicate_tags(combined)[:15]
-                                        print(f"[BACKGROUND] Combined tags: {len(final_tags)} unique total (transcript + visual)")
+                                        # Check if transcript has meaningful content
+                                        if transcript_text.strip() and len(transcript_text.strip()) >= 20:
+                                            # Transcript is valid - generate tags from it
+                                            transcript_tags = get_text_tags(transcript_text)
+                                            transcript_tags = deduplicate_tags(transcript_tags)
+                                            print(f"[BACKGROUND] Generated {len(transcript_tags)} unique tags from transcript")
+                                            
+                                            # Combine transcript tags and visual labels (remove duplicates case-insensitively)
+                                            combined = transcript_tags + visual_labels
+                                            final_tags = deduplicate_tags(combined)[:15]
+                                            print(f"[BACKGROUND] Combined tags: {len(final_tags)} unique total (transcript + visual)")
+                                        else:
+                                            # Transcript is empty or too short - use only visual labels
+                                            if visual_labels:
+                                                final_tags = visual_labels[:15]
+                                                print(f"[BACKGROUND] Transcript too short/empty, using {len(final_tags)} visual labels only")
+                                            else:
+                                                final_tags = []
+                                                print(f"[BACKGROUND] No transcript and no visual labels available")
                                         
-                                        # Update DynamoDB with both transcript and combined tags
+                                        # Update DynamoDB with both transcript and final tags
                                         dynamodb.update_item(
                                             Key={'filename': db_item_key},
                                             UpdateExpression='SET tags = :tags, transcript = :transcript',
