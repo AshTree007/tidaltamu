@@ -5,6 +5,7 @@ import uuid
 from fastapi import HTTPException
 from dotenv import load_dotenv
 
+# Load variables from the .env file immediately
 load_dotenv()
 
 # Global variables
@@ -16,24 +17,35 @@ def make_key(filename: str) -> str:
 
 def startup():
     global s3_client, AWS_BUCKET
-    AWS_REGION = os.getenv("S3_REGION")
-    AWS_BUCKET = os.getenv("BUCKET_NAME") # <--- MAKE SURE THIS IS SET
     
+    # 1. Get values from .env
+    AWS_REGION = os.getenv("S3_REGION")
+    AWS_BUCKET = os.getenv("BUCKET_NAME")
+    
+    # Safety Check: detailed error if .env is missing
+    if not AWS_BUCKET:
+        print("CRITICAL ERROR: 'AWS_BUCKET' is missing. Did you create the .env file?")
+    if not AWS_REGION:
+        print("WARNING: 'AWS_REGION' is missing. Defaulting to us-east-1.")
+        AWS_REGION = "us-east-1"
+
+    # 2. Connect to S3 (Using EC2 IAM Role + Region from env)
     if s3_client is None:
         s3_client = boto3.client('s3', region_name=AWS_REGION)
-        print("S3 Client Initialized")
+        print(f"S3 Initialized. Target Bucket: {AWS_BUCKET}")
 
 def upload_file(file_path: str) -> str:
-    # CRITICAL FIX: Check if s3_client exists, if not, start it up.
     global s3_client, AWS_BUCKET
-    if s3_client is None:
+    
+    # Ensure startup ran
+    if s3_client is None or AWS_BUCKET is None:
         startup()
         
     file_name = file_path.split('/')[-1]
     key = make_key(file_name)
     
     try:
-        # Open in Binary Mode
+        # Open in Binary Mode ("rb") for PDF/Images
         with open(file_path, "rb") as f:
             contents = f.read()
 
