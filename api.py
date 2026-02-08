@@ -77,3 +77,13 @@ async def get_transcript_endpoint(payload: dict = Body(...)):
     if not key:
         return {"success": False, "error": "missing key"}
     return get_transcript(key)
+
+# Qwen search route: expects JSON body {"query": "natural language search"}
+@app.post("/qwen_search")
+async def qwen_search(payload: dict = Body(...)):
+    from DB_stuff import qwen_search_files
+    query = payload.get('query')
+    if not query:
+        return {"success": False, "error": "missing query", "files": []}
+    files = qwen_search_files(query)
+    return {"success": True, "files": files}

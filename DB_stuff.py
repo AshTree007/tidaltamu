@@ -695,3 +695,113 @@ def delete_file(key: str):
     except Exception as e:
         print(f"Delete Error: {e}")
         return False
+
+def qwen_search_files(user_query: str):
+    """Use Qwen to find files matching natural language query by reading transcripts and tags"""
+    global dynamodb, s3_client, AWS_BUCKET
+    if dynamodb is None: startup()
+    
+    api_key = os.getenv("API_KEY")
+    
+    try:
+        print(f"[QWEN SEARCH] Fetching all files for context...")
+        
+        # Scan all files from DynamoDB
+        response = dynamodb.scan()
+        items = response.get('Items', [])
+        
+        if not items:
+            print("[QWEN SEARCH] No files in database")
+            return []
+        
+        # Build file context with transcripts and tags
+        file_context = []
+        for item in items:
+            key = item.get('filename', '')
+            original_name = item.get('original_name', key)
+            tags = item.get('tags', [])
+            transcript = item.get('transcript', '')[:1000]  # Limit to 1000 chars per file
+            
+            context = f"File: {original_name}\n"
+            if tags:
+                context += f"Tags: {', '.join(tags)}\n"
+            if transcript:
+                context += f"Transcript (first 1000 chars): {transcript}\n"
+            context += "---\n"
+            
+            file_context.append({
+                'key': key,
+                'name': original_name,
+                'tags': tags,
+                'context': context
+            })
+        
+        # Build prompt for Qwen
+        all_context = "\n".join([f['context'] for f in file_context])
+        
+        prompt = f"""You are a search agent. The user is looking for files matching their natural language query.
+
+Here is a list of all files with their metadata (name, tags, and transcript excerpts):
+
+{all_context}
+
+User Query: {user_query}
+
+Your task: Identify which files match the user's query based on the content, tags, and transcripts. Return ONLY the filenames (original_name) of matching files, one per line. If no files match, return "NO_MATCHES"."""
+
+        print("[QWEN SEARCH] Sending query to Qwen...")
+        
+        response = requests.post(
+            "https://api.featherless.ai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "Qwen/Qwen2.5-7B-Instruct",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 500
+            },
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if 'choices' in result and len(result['choices']) > 0:
+                response_text = result['choices'][0]['message']['content'].strip()
+                print(f"[QWEN SEARCH] Response: {response_text}")
+                
+                if "NO_MATCHES" in response_text.upper():
+                    print("[QWEN SEARCH] No matches found")
+                    return []
+                
+                # Parse filenames from response
+                matched_names = [line.strip() for line in response_text.split('\n') if line.strip()]
+                
+                # Find matching files
+                matching_files = []
+                for f in file_context:
+                    if any(name.lower() in f['name'].lower() for name in matched_names):
+                        matching_files.append({
+                            "key": f['key'],
+                            "name": f['name'],
+                            "tags": f['tags'],
+                            "url": s3_client.generate_presigned_url(
+                                'get_object',
+                                Params={'Bucket': AWS_BUCKET, 'Key': f['key']},
+                                ExpiresIn=3600
+                            ) if s3_client else ''
+                        })
+                
+                print(f"[QWEN SEARCH] Found {len(matching_files)} matching files")
+                return matching_files
+        else:
+            print(f"[QWEN SEARCH] Featherless API error: {response.status_code}")
+            return []
+        
+    except Exception as e:
+        print(f"[QWEN SEARCH] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []

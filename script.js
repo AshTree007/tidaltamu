@@ -14,10 +14,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if(document.getElementById('uploadForm')) setupUpload();
   
-  // NEW: Search Logic
-  const searchInput = document.getElementById('searchInput');
-  if(searchInput){
-    searchInput.addEventListener('input', (e) => refreshSearchResults(e.target.value));
+  // NEW: Quick search on saved files page
+  const quickSearchInput = document.getElementById('quickSearchInput');
+  if(quickSearchInput){
+    quickSearchInput.addEventListener('input', (e) => filterSavedList(e.target.value));
+  }
+  
+  // NEW: Qwen search on search page
+  const qwenSearchBtn = document.getElementById('qwenSearchBtn');
+  if(qwenSearchBtn){
+    qwenSearchBtn.addEventListener('click', () => {
+      const query = document.getElementById('qwenSearchInput').value;
+      if(query.trim()) performQwenSearch(query);
+    });
+    
+    // Also allow Enter key to submit
+    document.getElementById('qwenSearchInput')?.addEventListener('keypress', (e) => {
+      if(e.key === 'Enter') qwenSearchBtn.click();
+    });
   }
 });
 
@@ -173,12 +187,88 @@ async function refreshSavedList() {
   }
 }
 
+// Quick filter for saved files (by filename or tags)
+function filterSavedList(query) {
+  const ul = document.getElementById('savedList');
+  if(!ul) return;
+  
+  const items = ul.querySelectorAll('li');
+  const lowerQuery = query.toLowerCase();
+  
+  items.forEach(item => {
+    const text = item.textContent.toLowerCase();
+    if(query === '' || text.includes(lowerQuery)) {
+      item.style.display = '';
+    } else {
+      item.style.display = 'none';
+    }
+  });
+}
+
+// Qwen-powered natural language search
+async function performQwenSearch(query) {
+  const ul = document.getElementById('qwenSearchResults');
+  if(!ul) return;
+  
+  ul.innerHTML = '<li style="color:#ffaa00">Searching with Qwen...</li>';
+  
+  try {
+    const resp = await fetch(API_BASE + '/qwen_search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ query: query })
+    });
+    
+    const data = await resp.json();
+    ul.innerHTML = '';
+    
+    if(!data.success || !data.files || data.files.length === 0) {
+      ul.innerHTML = '<li style="color:gray">No matching files found.</li>';
+      return;
+    }
+    
+    data.files.forEach(f => {
+      const li = document.createElement('li');
+      
+      // Left side: filename + tags
+      const left = document.createElement('div');
+      const title = document.createElement('div');
+      title.textContent = f.name;
+      title.style.fontWeight = 'bold';
+      title.style.color = 'white';
+      
+      const tags = document.createElement('div');
+      tags.style.color = '#4ea8ff';
+      tags.style.fontSize = '12px';
+      tags.textContent = (f.tags && f.tags.length > 0) ? "Tags: " + f.tags.join(', ') : "No tags";
+      
+      left.appendChild(title);
+      left.appendChild(tags);
+      
+      // Right side: view button
+      const btn = document.createElement('button');
+      btn.textContent = 'View';
+      btn.style.padding = '5px 15px';
+      btn.style.cursor = 'pointer';
+      btn.style.marginLeft = 'auto';
+      btn.onclick = () => window.open(f.url, '_blank');
+      
+      li.appendChild(left);
+      li.appendChild(btn);
+      ul.appendChild(li);
+    });
+  } catch(err) {
+    console.error('Qwen search error:', err);
+    ul.innerHTML = `<li style="color:red">Search error: ${err.message}</li>`;
+  }
+}
+
 // 4. Search Logic (UPDATED to use Backend API)
 async function refreshSearchResults(query) {
   const ul = document.getElementById('searchResults');
   if(!ul) return;
   
-  if (!query) { 
+  if (!query) {
       ul.innerHTML = ''; 
       return; 
   }
