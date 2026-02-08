@@ -248,12 +248,18 @@ def get_text_tags(text):
         # Truncate to first 4000 chars to respect model limits
         text_truncated = text[:4000]
         
-        prompt = f"""Analyze the following transcript and extract 5-8 of the MOST IMPORTANT and MEANINGFUL tags that capture the key topics, concepts, and ideas discussed. Focus on semantic importance and relevance, not just frequent words.
+        prompt = f"""You are an AI assistant that generates descriptive tags for user-uploaded documents. The document content is provided below. Your task is to analyze the text and extract 5-8 of the most important and meaningful tags that capture the key topics, concepts, and ideas.
+
+**Important Instructions:**
+- The document can be of any type (e.g., academic paper, personal note, code snippet, homework). Do not assume a specific document type.
+- The tags should be neutral, objective, and directly related to the provided text.
+- Avoid generating generic, boilerplate, or irrelevant tags (e.g., "Contract", "Legal Document", "Agreement").
+- Focus on semantic importance and relevance, not just frequent words.
 
 Transcript:
 {text_truncated}
 
-Respond with ONLY a comma-separated list of tags, nothing else. Example format: Machine Learning, Data Science, Neural Networks"""
+Respond with ONLY a comma-separated list of tags, nothing else. Example format: Mathematics, Algebra, Equations, Homework"""
         
         response = requests.post(
             "https://api.featherless.ai/v1/chat/completions",
@@ -358,10 +364,17 @@ def process_pdf_file(bucket, key):
                     # Create prompt including up to 3 base64 JPEGs
                     prompt_parts = [f"Image {i+1} (base64): {b64[:500]}...[TRUNC]" for i, b64 in enumerate(images_b64)]
                     prompt = (
-                        "You are given images of a document (as base64 JPEG). Perform OCR on the images to extract the text. "
-                        "Then, analyze the extracted text and return 5-8 MOST IMPORTANT tags that summarize the main topics. "
-                        "Respond with ONLY a comma-separated list of tags."
-                        "\n\n" + "\n\n".join(prompt_parts)
+                        "You are an AI assistant that analyzes images of documents. Your task is to:\n"
+                        "1. Perform OCR on the provided images to extract all the text.\n"
+                        "2. Analyze the extracted text and generate 5-8 of the most important and meaningful tags that capture the key topics, concepts, and ideas.\n\n"
+                        "**Important Instructions:**\n"
+                        "- The document can be of any type (e.g., academic paper, personal note, code snippet, homework). Do not assume a specific document type.\n"
+                        "- The tags should be neutral, objective, and directly related to the extracted text.\n"
+                        "- Avoid generating generic, boilerplate, or irrelevant tags (e.g., \"Contract\", \"Legal Document\", \"Agreement\").\n"
+                        "- Focus on semantic importance and relevance, not just frequent words.\n\n"
+                        "Respond with ONLY a comma-separated list of tags, nothing else. Example format: Mathematics, Algebra, Equations, Homework\n\n"
+                        "The images are provided below as base64 encoded JPEGs.\n"
+                        + "\n\n".join(prompt_parts)
                     )
 
                     resp = requests.post(
