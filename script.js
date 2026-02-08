@@ -1,7 +1,17 @@
 // const API_BASE = (typeof window !== 'undefined' && (window.API_BASE || window.__API_BASE__)) ? (window.API_BASE || window.__API_BASE__) : '';
 const API_BASE = "https://ec2-44-252-41-71.us-west-2.compute.amazonaws.com"
 
-
+// Highlight active nav tab
+document.addEventListener('DOMContentLoaded', () => {
+  const currentPage = window.location.pathname.split('/').pop() || 'index.html';
+  const navLinks = document.querySelectorAll('.nav a');
+  navLinks.forEach(link => {
+    const href = link.getAttribute('href');
+    if(href === currentPage || (currentPage === '' && href === 'index.html')){
+      link.classList.add('active');
+    }
+  });
+});
 
 async function saveFileToServer(file){
   console.log(API_BASE);
