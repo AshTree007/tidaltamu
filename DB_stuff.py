@@ -258,7 +258,7 @@ Respond with ONLY a comma-separated list of tags, nothing else. Example format: 
                 "Content-Type": "application/json"
             },
             json={
-                "model": "qwen-2.5-7b",
+                "model": "Qwen/Qwen2.5-7B-Instruct",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.3,  # Lower temperature for more focused output
                 "max_tokens": 200
