@@ -358,7 +358,8 @@ def process_pdf_file(bucket, key):
                     # Create prompt including up to 3 base64 JPEGs
                     prompt_parts = [f"Image {i+1} (base64): {b64[:500]}...[TRUNC]" for i, b64 in enumerate(images_b64)]
                     prompt = (
-                        "You are given images (as base64 JPEG). Analyze the visual content and return 5-8 MOST IMPORTANT tags that summarize the main topics or objects in the images. "
+                        "You are given images of a document (as base64 JPEG). Perform OCR on the images to extract the text. "
+                        "Then, analyze the extracted text and return 5-8 MOST IMPORTANT tags that summarize the main topics. "
                         "Respond with ONLY a comma-separated list of tags."
                         "\n\n" + "\n\n".join(prompt_parts)
                     )
@@ -390,28 +391,6 @@ def process_pdf_file(bucket, key):
                         print(f"Featherless image API error: {resp.status_code} - {resp.text}")
             except Exception as e:
                 print(f"PDF->image conversion failed: {e}")
-
-        # 3) Final fallback: send truncated PDF base64 to Qwen (as before)
-        try:
-            import base64
-            pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
-            prompt = f"Extract 5-8 important tags from this PDF document (base64 encoded):\n\n{pdf_base64[:3000]}"
-            resp = requests.post(
-                "https://api.featherless.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "google/gemma-3-27b-it", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 200},
-                timeout=60
-            )
-            if resp.status_code == 200:
-                result = resp.json()
-                if 'choices' in result and len(result['choices']) > 0:
-                    tags_text = result['choices'][0]['message']['content'].strip()
-                    tags = [t.strip() for t in tags_text.split(',') if t.strip()]
-                    tags = deduplicate_tags(tags)[:8]
-                    print(f"Extracted {len(tags)} tags from PDF via Gemma (fallback)")
-                    return tags
-        except Exception as e:
-            print(f"Final PDF->Gemma fallback failed: {e}")
 
         return []
     except Exception as e:
@@ -553,7 +532,7 @@ def upload_file(file_path: str) -> str:
         if file_ext in ['jpg', 'jpeg', 'png']:
             print("Processing as IMAGE using Rekognition...")
             tags = get_ai_tags(AWS_BUCKET, key, file_ext)
-        elif file_ext in ['txt', 'md']:
+        elif file_ext in ['txt', 'md', 'csv', 'json', 'xml', 'html', 'htm', 'log']:
             print("Processing as TEXT using Qwen...")
             tags = process_text_file(AWS_BUCKET, key)
         elif file_ext in ['pdf']:
