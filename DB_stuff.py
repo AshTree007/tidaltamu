@@ -12,6 +12,10 @@ try:
     from pypdf import PdfReader
 except ImportError:
     PdfReader = None
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None
 from fastapi import HTTPException
 from dotenv import load_dotenv
 from boto3.dynamodb.conditions import Attr
@@ -304,62 +308,112 @@ def process_text_file(bucket, key):
         return []
 
 def process_pdf_file(bucket, key):
-    """Download PDF from S3 and send directly to Qwen for tagging"""
+    """Download PDF from S3. Try extracting text; if available, use Qwen for tagging. Otherwise render pages to images and send images to Qwen."""
     global s3_client
     if s3_client is None:
         startup()
-    
+
     api_key = os.getenv("API_KEY")
-    
+
     try:
         print(f"Processing PDF file {key}...")
         response = s3_client.get_object(Bucket=bucket, Key=key)
         pdf_bytes = response['Body'].read()
-        
-        # Encode PDF as base64 for sending to Qwen
-        import base64
-        pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
-        print(f"PDF encoded: {len(pdf_base64)} characters (base64)")
-        
-        # Send PDF directly to Qwen with instructions to extract and tag
-        prompt = f"""You are analyzing a PDF document (provided as base64). Your task is to:
-1. Extract and understand the key content and concepts from this PDF
-2. Identify 5-8 of the MOST IMPORTANT and MEANINGFUL tags that capture the main topics and ideas
 
-Respond with ONLY a comma-separated list of tags, nothing else. Example format: Machine Learning, Data Science, Neural Networks
+        # 1) Try to extract text using pypdf
+        extracted_text = ''
+        if PdfReader is not None:
+            try:
+                reader = PdfReader(io.BytesIO(pdf_bytes))
+                for page in reader.pages:
+                    try:
+                        txt = page.extract_text() or ''
+                        extracted_text += txt + '\n'
+                    except Exception:
+                        continue
+            except Exception as e:
+                print(f"pypdf extraction failed: {e}")
 
-PDF (base64): {pdf_base64[:500]}...[PDF_CONTENT]"""
-        
-        response = requests.post(
-            "https://api.featherless.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "Qwen/Qwen2.5-7B-Instruct",
-                "messages": [{
-                    "role": "user", 
-                    "content": f"Extract 5-8 important tags from this PDF document (base64 encoded):\n\n{pdf_base64}"
-                }],
-                "temperature": 0.3,
-                "max_tokens": 200
-            },
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            if 'choices' in result and len(result['choices']) > 0:
-                tags_text = result['choices'][0]['message']['content'].strip()
-                tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
-                tags = deduplicate_tags(tags)[:8]
-                print(f"Extracted {len(tags)} tags from PDF via Qwen")
-                return tags
-        else:
-            print(f"Featherless API error: {response.status_code} - {response.text}")
-            return []
-            
+        if extracted_text and len(extracted_text.strip()) >= 50:
+            print(f"Extracted text from PDF ({len(extracted_text)} chars), sending to Qwen")
+            tags = get_text_tags(extracted_text)
+            tags = deduplicate_tags(tags)[:8]
+            print(f"PDF text tags: {tags}")
+            return tags
+
+        # 2) Fallback: render PDF pages to images using PyMuPDF (fitz)
+        if fitz is not None:
+            try:
+                doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+                images_b64 = []
+                max_pages = min(3, doc.page_count)
+                import base64
+                for i in range(max_pages):
+                    page = doc.load_page(i)
+                    pix = page.get_pixmap(dpi=150)
+                    img_bytes = pix.tobytes(output='jpeg')
+                    images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+
+                if images_b64:
+                    # Create prompt including up to 3 base64 JPEGs
+                    prompt_parts = [f"Image {i+1} (base64): {b64[:500]}...[TRUNC]" for i, b64 in enumerate(images_b64)]
+                    prompt = (
+                        "You are given up to 3 images (as base64 JPEG). Analyze the visual content and return 5-8 MOST IMPORTANT tags that summarize the main topics or objects in the images. "
+                        "Respond with ONLY a comma-separated list of tags."
+                        "\n\n" + "\n\n".join(prompt_parts)
+                    )
+
+                    resp = requests.post(
+                        "https://api.featherless.ai/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": "Qwen/Qwen2.5-7B-Instruct",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.3,
+                            "max_tokens": 200
+                        },
+                        timeout=60
+                    )
+
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        if 'choices' in result and len(result['choices']) > 0:
+                            tags_text = result['choices'][0]['message']['content'].strip()
+                            tags = [t.strip() for t in tags_text.split(',') if t.strip()]
+                            tags = deduplicate_tags(tags)[:8]
+                            print(f"Extracted {len(tags)} tags from PDF images via Qwen")
+                            return tags
+                    else:
+                        print(f"Featherless image API error: {resp.status_code} - {resp.text}")
+            except Exception as e:
+                print(f"PDF->image conversion failed: {e}")
+
+        # 3) Final fallback: send truncated PDF base64 to Qwen (as before)
+        try:
+            import base64
+            pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+            prompt = f"Extract 5-8 important tags from this PDF document (base64 encoded):\n\n{pdf_base64[:3000]}"
+            resp = requests.post(
+                "https://api.featherless.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "Qwen/Qwen2.5-7B-Instruct", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 200},
+                timeout=60
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                if 'choices' in result and len(result['choices']) > 0:
+                    tags_text = result['choices'][0]['message']['content'].strip()
+                    tags = [t.strip() for t in tags_text.split(',') if t.strip()]
+                    tags = deduplicate_tags(tags)[:8]
+                    print(f"Extracted {len(tags)} tags from PDF via Qwen (fallback)")
+                    return tags
+        except Exception as e:
+            print(f"Final PDF->Qwen fallback failed: {e}")
+
+        return []
     except Exception as e:
         print(f"PDF Processing Error: {e}")
         import traceback
