@@ -20,8 +20,8 @@ def make_key(filename: str) -> str:
 def startup():
     global s3_client, AWS_BUCKET, rekognition, dynamodb
     
-    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-    AWS_BUCKET = os.getenv("AWS_BUCKET")
+    AWS_REGION = os.getenv("S3_REGION")
+    AWS_BUCKET = os.getenv("BUCKET_NAME")
 
     if not AWS_BUCKET:
         print("CRITICAL ERROR: AWS_BUCKET not found. Check .env file.")
